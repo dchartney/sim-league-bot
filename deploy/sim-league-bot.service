@@ -1,0 +1,20 @@
+[Unit]
+Description=sim-league-bot - SCSRA Discord bot (Ricky Bobby)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dhartney
+WorkingDirectory=/opt/sim-league-bot
+ExecStart=/opt/sim-league-bot/.venv/bin/python -m sim_league_bot.main
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:/opt/sim-league-bot/logs/service.log
+StandardError=append:/opt/sim-league-bot/logs/service.log
+# Reads .env + OpenBao itself; nothing sensitive on the command line.
+# GOTCHA (same as household-manager and homelab-mcp): must live under
+# /opt - SELinux denies init_t exec on user_home_t.
+
+[Install]
+WantedBy=multi-user.target
