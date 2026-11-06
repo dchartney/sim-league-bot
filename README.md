@@ -27,13 +27,16 @@ League page: `https://www.simracerhub.com/scoring/league_series.php?league_id=34
 
 Tested live against real SCSRA data on Sim Racer Hub while building this (2026-11-05): both a single-class Next Gen race and a multiclass Arca race, both season-standings and single-race results.
 
+## Deployment
+Runs on its own LXC (VMID 111, Debian 12, IP 10.30.15.176, node BeardsProx), separate from VM 107 (which hosts homelab-mcp/OpenBao) per David's decision. System account `sim-league-bot` (no sudo, no login shell). Provisioned by Albert (Advisor/Actor model). Because it's a separate host from OpenBao, `.env`'s `BAO_ADDR` must be `https://secrets.hartney.me` (the LAN-facing Caddy front door), NOT `http://127.0.0.1:8200` like household-manager uses — that address only works for services running directly on VM 107.
+
 ## Status
-Design finalized. Built: the rule-book scaffold (git-versioned `rules/*.md`) and a first pass at the bot itself - `sim_league_bot/` (secrets/OpenBao loading, persona, admin roster, NL layer with a cost gate + rate limit, Discord-modal rule editing, Sim Racer Hub results scraping, slash commands, entrypoint).
+Design finalized. Built: the rule-book scaffold (git-versioned `rules/*.md`), a first pass at the bot itself (`sim_league_bot/`), its OpenBao AppRole/policy/secrets, a private GitHub repo (`dchartney/sim-league-bot`), and the LXC it will run on.
 
 Not done yet:
-- No Discord application/bot token exists, so none of this has run against a live Discord connection.
-- No OpenBao secrets configured for this bot (the AppRole paths in `secrets.py` - `sim-league-bot/discord`, `sim-league-bot/anthropic` - don't exist yet).
-- No LXC/host provisioned (Albert builds that once the rest is ready).
+- The repo hasn't been cloned onto the LXC / venv set up / systemd service installed there yet (next step).
+- The AppRole secret ID (generated when the AppRole was created) still needs to be placed at `/opt/sim-league-bot/.bao-secret-id` on the LXC by David directly, via the Proxmox console — deliberately not routed through any automated channel since nobody else has that value.
+- No Discord application has actually been connected to yet (nothing has run against live Discord).
 - Channel names in `.env.example` are placeholders - David hasn't picked the real ones yet.
 - The exact `/ruling` rate limit numbers in `.env.example` are placeholders, not a number David has confirmed.
 
