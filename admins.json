@@ -1,8 +1,9 @@
 [
-  {"name": "Devin Butchino", "discord_id": null},
-  {"name": "Ryan Gomes", "discord_id": null},
-  {"name": "Josh Hall", "discord_id": null},
-  {"name": "Sylvain Sigouin", "discord_id": null},
-  {"name": "David Hartney", "discord_id": "366347675026849802"},
-  {"name": "Loren Vincent", "discord_id": null}
+  {"name": "Devin Butchino", "title": "President", "discord_id": "730963548368404481"},
+  {"name": "Ryan Gomes", "title": "CEO", "discord_id": "664572929358561293"},
+  {"name": "Josh Hall", "title": "CFO", "discord_id": "370382653096067074"},
+  {"name": "Sylvain Sigouin", "title": "Points Director", "discord_id": "567218248714813440"},
+  {"name": "David Hartney", "title": "CISO", "discord_id": "366347675026849802"},
+  {"name": "Loren Vincent", "title": "Graphics Director", "discord_id": "786789776220094475"},
+  {"name": "Jessie Whittington", "title": "Race Director", "discord_id": "334698092941017092"}
 ]
