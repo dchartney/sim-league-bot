@@ -24,6 +24,8 @@ import os
 import re
 import sys
 from dataclasses import dataclass, field
+from datetime import date
+from pathlib import Path
 from typing import Optional
 
 import discord
@@ -61,6 +63,16 @@ TOOLS = [
         "input_schema": {"type": "object", "properties": {"description": {"type": "string"}}, "required": ["description"]},
     },
 ]
+
+SCHEDULE_PATH = Path(__file__).resolve().parent.parent / "schedule.md"
+
+
+def _load_schedule() -> str:
+    try:
+        return SCHEDULE_PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return "(no schedule loaded - tell the user the schedule isn't available yet)"
+
 
 _anthropic: Optional[Anthropic] = None
 
@@ -129,8 +141,12 @@ async def ask(text: str, reporter_name: str, reporter_id: str) -> AskResult:
         "Today's rule book follows. Cite exact rule numbers (e.g. 'Rule 3.4.2') when answering a rules "
         "question, and quote the relevant line(s). If the rule book does not clearly cover the driver's "
         "scenario, call escalate_ruling instead of answering - never guess, soften, or invent a ruling "
-        "the book doesn't support. For a schedule question: the schedule is not finalized yet this season, "
-        "so say that plainly rather than guessing at dates.\n\n"
+        "the book doesn't support. For a schedule question: answer ONLY from the SCHEDULE below. It lists "
+        "dates, tracks, stage and lap counts and nothing else - if asked something it doesn't contain "
+        "(start time, year, car setup, practice/qualifying), say it isn't listed and point them to the "
+        "admins rather than guessing. Today's date is "
+        f"{date.today().isoformat()}.\n\n"
+        f"SCHEDULE:\n{_load_schedule()}\n\n"
         f"RULE BOOK:\n{rules.load_rulebook_text()}"
     )
 
