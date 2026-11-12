@@ -157,7 +157,8 @@ async def classify_in_scope(text: str) -> bool:
                 "Reply with exactly one word: SCOPE or OTHER. SCOPE if the message is a question about the "
                 "SCSRA iRacing league's race schedule, a rules/ruling question about a racing scenario, or a "
                 "request to report/complain to the league admins about a driver, harassment, abusive language "
-                "or conduct. OTHER for anything else (chitchat, unrelated topics, testing the bot, etc)."
+                "or conduct, or reporting a bug/problem with this Discord bot or suggesting a feature or "
+                "improvement for it. OTHER for anything else (chitchat, unrelated topics, general testing, etc)."
             ),
             messages=[{"role": "user", "content": text}],
         )
