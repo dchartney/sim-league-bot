@@ -5,6 +5,8 @@ Flags/Restarts section alone is several times that), but a single rule
 paragraph comfortably fits. Every submit becomes a git commit (see
 rules.py) - that commit history is this project's rulebook version
 control, not a separate database."""
+import asyncio
+
 import discord
 
 from . import admins, discordchan, rules
@@ -30,11 +32,21 @@ class RuleEditModal(discord.ui.Modal):
         except (ValueError, RuntimeError) as exc:
             await interaction.response.send_message(str(exc), ephemeral=True)
             return
-        await interaction.response.send_message(f"Rule {self.rule_number} updated (commit `{commit}`).", ephemeral=True)
+        # The edit is already live (local commit). Defer so the GitHub push, which
+        # takes a second or two, can't blow Discord's 3-second response window.
+        await interaction.response.defer(ephemeral=True)
+        pushed, push_note = await asyncio.to_thread(rules.push_edits)
+        status = push_note if pushed else f"saved here, but NOT on GitHub yet ({push_note})"
+        await interaction.followup.send(f"Rule {self.rule_number} updated (commit `{commit}`; {status}).", ephemeral=True)
         await discordchan.post(
             interaction.client, "RULEBOOK_LOG_CHANNEL_NAME",
-            f"**Rule {self.rule_number} edited** by {editor_name} (commit `{commit}`):\n```{self.text_input.value}```",
+            f"**Rule {self.rule_number} edited** by {editor_name} (commit `{commit}`, {status}):\n```{self.text_input.value}```",
         )
+        if not pushed:
+            await discordchan.post(
+                interaction.client, "FEEDBACK_CHANNEL_NAME",
+                f"Rule edit {commit} was NOT pushed to GitHub: {push_note}",
+            )
 
 
 async def start_edit(interaction: discord.Interaction, rule_number: str) -> None:

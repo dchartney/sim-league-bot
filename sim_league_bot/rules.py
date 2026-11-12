@@ -2,6 +2,7 @@
 section, see the repo README for why) and finds/edits individual numbered
 rules within a section file. Git (in this repo's working tree) is the
 version-history mechanism - every edit here is followed by a commit."""
+import os
 import re
 import subprocess
 import sys
@@ -94,6 +95,37 @@ def replace_rule(rule_number: str, new_text: str, editor_name: str, editor_email
     print(result.stdout, file=sys.stderr)
     rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=repo_dir, check=True, capture_output=True, text=True)
     return rev.stdout.strip()
+
+
+def push_edits() -> tuple:
+    """Pushes the working tree's HEAD to the `rule-edits` branch on GitHub so
+    every Discord rule edit is recorded there (author = the admin, diff in the
+    commit). Never touches `main`. Uses its OWN write-enabled deploy key
+    (RULE_PUSH_SSH_KEY), separate from the read-only key used to pull code.
+    Returns (ok, note); never raises, because the local commit already
+    succeeded and the edit is live either way. Blocking: call via
+    asyncio.to_thread."""
+    key = os.environ.get("RULE_PUSH_SSH_KEY", "/opt/sim-league-bot/.ssh/sim-league-bot-rules-push_ed25519")
+    remote = os.environ.get("RULE_PUSH_REMOTE", "git@github.com:dchartney/sim-league-bot.git")
+    branch = os.environ.get("RULE_PUSH_BRANCH", "rule-edits")
+    if branch == "main":
+        return False, "refusing to push rule edits to main"
+    if not Path(key).exists():
+        return False, f"push key not configured ({key})"
+    repo_dir = RULES_DIR.parent
+    env = dict(os.environ)
+    env["GIT_SSH_COMMAND"] = f"ssh -i {key} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+    try:
+        result = subprocess.run(
+            ["git", "push", remote, f"HEAD:refs/heads/{branch}"],
+            cwd=repo_dir, env=env, capture_output=True, text=True, timeout=45,
+        )
+    except Exception as exc:
+        return False, f"push failed: {exc!r}"
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip().splitlines()[-1:] or ["unknown error"]
+        return False, f"push failed: {detail[0][:200]}"
+    return True, f"pushed to GitHub branch {branch}"
 
 
 def diff_since(ref: str) -> str:
