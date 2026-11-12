@@ -32,7 +32,7 @@ from typing import Optional
 import discord
 from anthropic import Anthropic
 
-from . import discordchan, feedback, ratelimit, rules, voice
+from . import admins, discordchan, feedback, ratelimit, rule_changes, rule_chat, rules, voice
 
 CLASSIFY_MODEL = "claude-haiku-4-5"
 MAIN_MODEL = "claude-opus-4-5"
@@ -132,6 +132,42 @@ def _forget(user_id: str) -> None:
     _history.pop(user_id, None)
 
 
+# Offered only to League admins in the admin chat channel. It does NOT change
+# anything: the bot shows the admin a before/after preview with Confirm/Cancel
+# buttons (see rule_chat.py) and only applies it on their click.
+RULE_TOOL = {
+    "name": "propose_rule_changes",
+    "description": (
+        "Propose changes to the rule book when an admin asks to edit, reword, delete or renumber rules. This "
+        "only PREVIEWS the change for the admin to confirm - it changes nothing, so never say a change has been "
+        "made. Put the admin's whole request into ONE call, with operations in the order they should happen "
+        "(e.g. delete 1.5.2 BEFORE renumbering 1.5.3 to 1.5.2). For 'replace', give the full new text of that "
+        "rule starting with its own number and a period (copy the current wording from the rule book exactly and "
+        "change only what the admin asked for). Renumbering moves a rule and its sub-rules within the same section "
+        "and does not rewrite other rules' text. If the request is vague (which rule? what wording?), ask the admin "
+        "instead of guessing."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "operations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "op": {"type": "string", "enum": ["replace", "delete", "renumber"]},
+                        "number": {"type": "string", "description": "Existing rule number, e.g. 1.5.3"},
+                        "text": {"type": "string", "description": "replace only: full new text, starting with the rule number and a period"},
+                        "new_number": {"type": "string", "description": "renumber only: the new rule number"},
+                    },
+                    "required": ["op", "number"],
+                },
+            },
+        },
+        "required": ["operations"],
+    },
+}
+
 _anthropic: Optional[Anthropic] = None
 
 
@@ -173,6 +209,7 @@ async def classify_in_scope(text: str) -> bool:
 class AskResult:
     reply: str
     notifications: list = field(default_factory=list)  # [(text, channel_env_var)]
+    proposal: object = None  # rule_changes.Plan awaiting an admin's Confirm click
 
 
 def _dispatch_tool(name: str, tool_input: dict, reporter_name: str, reporter_id: str, attachments=None) -> tuple:
@@ -202,7 +239,7 @@ def _dispatch_tool(name: str, tool_input: dict, reporter_name: str, reporter_id:
     return None, None, None
 
 
-async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None, allow_report: bool = False, history=None) -> AskResult:
+async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None, allow_report: bool = False, history=None, allow_rule_edit: bool = False) -> AskResult:
     """The expensive call: whole rule book in context (cached), Ricky's
     persona, tools for escalation/feedback. Caller is responsible for the
     cost gate (classify_in_scope for free-text DMs) and the rate limit
@@ -215,7 +252,9 @@ async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None,
         "the book doesn't support. For a schedule question: answer ONLY from the SCHEDULE below. It lists "
         "dates, tracks, stage and lap counts and nothing else - if asked something it doesn't contain "
         "(start time, year, car setup, practice/qualifying), say it isn't listed and point them to the "
-        "admins rather than guessing. This is a Discord chat: keep replies tight (a few short paragraphs, "
+        "admins rather than guessing. If someone asks you to change the rule book: with the propose_rule_changes "
+        "tool you may PROPOSE it (an admin must confirm; you never apply anything yourself); without that tool, "
+        "say only League admins can change rules (in the admin channel) and mention /rule edit. This is a Discord chat: keep replies tight (a few short paragraphs, "
         "ideally under 1500 characters) unless asked for a full review, and use plain markdown only. Today's date is "
         f"{date.today().isoformat()}.\n\n"
         f"SCHEDULE:\n{_load_schedule()}\n\n"
@@ -228,7 +267,7 @@ async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None,
             model=MAIN_MODEL,
             max_tokens=2048,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            tools=TOOLS + ([REPORT_TOOL] if allow_report else []),
+            tools=TOOLS + ([REPORT_TOOL] if allow_report else []) + ([RULE_TOOL] if allow_rule_edit else []),
             messages=(history or []) + [{"role": "user", "content": text + (f"\n\n[The driver attached {len(attachments)} file(s) to this message.]" if attachments else "")}],
         )
     except Exception as exc:
@@ -238,10 +277,19 @@ async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None,
         return AskResult(voice.BROKE, notifications)
 
     draft_reply = None
+    proposal = None
     notifications = []
     for block in response.content:
         if block.type == "text":
             draft_reply = block.text
+        elif block.type == "tool_use" and block.name == "propose_rule_changes":
+            # Deterministic wording on purpose: the model must never claim a change was made.
+            plan = rule_changes.plan(block.input.get("operations"))
+            if plan.error:
+                draft_reply = f"I can't set that change up: {plan.error}"
+            else:
+                proposal = plan
+                draft_reply = "Here's what I'd change. Check the diff below, then hit Confirm or Cancel."
         elif block.type == "tool_use":
             result, notify, channel_var = _dispatch_tool(block.name, block.input, reporter_name, reporter_id, attachments)
             if result:
@@ -249,7 +297,7 @@ async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None,
             if notify and channel_var:
                 notifications.append((notify, channel_var))
 
-    return AskResult(draft_reply or "Not sure what to tell you on that one.", notifications)
+    return AskResult(draft_reply or "Not sure what to tell you on that one.", notifications, proposal)
 
 
 async def send_notifications(client: discord.Client, result: AskResult) -> None:
@@ -337,6 +385,7 @@ async def handle(message: discord.Message, client: discord.Client) -> None:
         user_id,
         attachments=[a.url for a in message.attachments],
         allow_report=not admin_chat,
+        allow_rule_edit=admin_chat and admins.is_admin(user_id),
         history=history,
     )
     pieces = _chunks(result.reply)
@@ -344,6 +393,8 @@ async def handle(message: discord.Message, client: discord.Client) -> None:
         await message.reply(pieces[0], mention_author=False)
         for extra in pieces[1:]:
             await message.channel.send(extra)
+        if result.proposal is not None:
+            await rule_chat.post_proposal(message, result.proposal)
     else:
         for piece in pieces:
             await message.channel.send(piece)

@@ -78,7 +78,7 @@ def replace_rule(rule_number: str, new_text: str, editor_name: str, editor_email
     text = block.file.read_text(encoding="utf-8")
     blocks = _blocks(text)
     blocks[block.start] = new_text
-    new_file_text = "\n\n".join(blocks) + "\n"
+    new_file_text = "\n\n".join(b.rstrip("\n") for b in blocks) + "\n"
     block.file.write_text(new_file_text, encoding="utf-8")
 
     repo_dir = block.file.parent.parent
