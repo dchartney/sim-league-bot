@@ -42,3 +42,15 @@ BROKE = (
 
 def escalation_line() -> str:
     return random.choice(ESCALATION_LINES)
+
+
+REPORT_SENT_LINES = [
+    "Done - I've put that in front of the admin team, with your name on it so they can follow up with you. "
+    "They make the call from here, not me.",
+    "Report's filed with the admins, your name attached so they can come back to you. "
+    "Final call is theirs - I just run the message.",
+]
+
+
+def report_sent_line() -> str:
+    return random.choice(REPORT_SENT_LINES)

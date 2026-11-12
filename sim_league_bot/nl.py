@@ -74,6 +74,30 @@ def _load_schedule() -> str:
         return "(no schedule loaded - tell the user the schedule isn't available yet)"
 
 
+# Only offered in DMs (a report from inside the admin channel would just post
+# to itself). Rule 12.1 of the rule book is the real complaint process: video
+# evidence + the exact wording of the issue, sent to the admin team.
+REPORT_TOOL = {
+    "name": "report_to_admins",
+    "description": (
+        "Send a report or complaint from the driver to the admin team's channel. Use when a driver wants to "
+        "report another driver, an on-track incident, or anything else for the admins to review. Rule 12.1 asks "
+        "for video evidence and the exact wording of the issue: if the driver has not given a clip/link "
+        "(or attached one) and the exact complaint, ask for them FIRST, once; if they say they have none or "
+        "just want it sent, send it anyway. Do not use this for ambiguous rule questions (use escalate_ruling) "
+        "or bot bugs/ideas (use report_bug / request_feature)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string", "description": "The driver's complaint/report in their own words, neutral and complete"},
+            "driver_involved": {"type": "string", "description": "Name of the driver being reported, if any"},
+            "evidence": {"type": "string", "description": "Any video links or evidence mentioned in the text (attachments are added automatically)"},
+        },
+        "required": ["summary"],
+    },
+}
+
 _anthropic: Optional[Anthropic] = None
 
 
@@ -115,8 +139,19 @@ class AskResult:
     notifications: list = field(default_factory=list)  # [(text, channel_env_var)]
 
 
-def _dispatch_tool(name: str, tool_input: dict, reporter_name: str, reporter_id: str) -> tuple:
+def _dispatch_tool(name: str, tool_input: dict, reporter_name: str, reporter_id: str, attachments=None) -> tuple:
     """Returns (result_text_or_None, notify_text_or_None, notify_channel_env_var_or_None)."""
+    if name == "report_to_admins":
+        summary = tool_input.get("summary", "")[:1500]
+        lines = [f"**Driver report** from {reporter_name} (<@{reporter_id}>)"]
+        if tool_input.get("driver_involved"):
+            lines.append(f"Driver involved: {tool_input['driver_involved'][:100]}")
+        lines.append(summary)
+        if tool_input.get("evidence"):
+            lines.append(f"Evidence mentioned: {tool_input['evidence'][:500]}")
+        if attachments:
+            lines.append("Attachments:\n" + "\n".join(attachments[:5]))
+        return voice.report_sent_line(), "\n".join(lines)[:1900], "ADMIN_CHAT_CHANNEL_NAME"
     if name == "escalate_ruling":
         scenario = tool_input.get("scenario", "")
         reason = tool_input.get("reason", "")
@@ -131,7 +166,7 @@ def _dispatch_tool(name: str, tool_input: dict, reporter_name: str, reporter_id:
     return None, None, None
 
 
-async def ask(text: str, reporter_name: str, reporter_id: str) -> AskResult:
+async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None, allow_report: bool = False) -> AskResult:
     """The expensive call: whole rule book in context (cached), Ricky's
     persona, tools for escalation/feedback. Caller is responsible for the
     cost gate (classify_in_scope for free-text DMs) and the rate limit
@@ -156,8 +191,8 @@ async def ask(text: str, reporter_name: str, reporter_id: str) -> AskResult:
             model=MAIN_MODEL,
             max_tokens=1024,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            tools=TOOLS,
-            messages=[{"role": "user", "content": text}],
+            tools=TOOLS + ([REPORT_TOOL] if allow_report else []),
+            messages=[{"role": "user", "content": text + (f"\n\n[The driver attached {len(attachments)} file(s) to this message.]" if attachments else "")}],
         )
     except Exception as exc:
         print(f"WARN: main NL call failed: {exc}", file=sys.stderr)
@@ -171,7 +206,7 @@ async def ask(text: str, reporter_name: str, reporter_id: str) -> AskResult:
         if block.type == "text":
             draft_reply = block.text
         elif block.type == "tool_use":
-            result, notify, channel_var = _dispatch_tool(block.name, block.input, reporter_name, reporter_id)
+            result, notify, channel_var = _dispatch_tool(block.name, block.input, reporter_name, reporter_id, attachments)
             if result:
                 draft_reply = result
             if notify and channel_var:
@@ -235,7 +270,13 @@ async def handle(message: discord.Message, client: discord.Client) -> None:
         await message.channel.send(voice.RATE_LIMITED)
         return
 
-    result = await ask(text, message.author.display_name, user_id)
+    result = await ask(
+        text,
+        message.author.display_name,
+        user_id,
+        attachments=[a.url for a in message.attachments],
+        allow_report=not admin_chat,
+    )
     if admin_chat:
         await message.reply(result.reply, mention_author=False)
     else:
