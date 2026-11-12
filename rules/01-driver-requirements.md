@@ -12,11 +12,9 @@
 
 1.5. Must run the series banner posted in Discord under Rules and Announcements, #banners.
 
-1.5.1. ARCA Series Banner
+1.5.1. O'Reilly Series Banner
 
-1.5.2. NextGen Banner
-
-1.5.3. MUST HAVE CORRECT BANNER ON BY THE 3rd RACE OF THE SEASON OR YOU WILL NOT ACCUMULATE POINTS. There is a 10-point penalty for every race with the incorrect banner.
+1.5.2. MUST HAVE CORRECT BANNER ON BY THE 3rd RACE OF THE SEASON OR YOU WILL NOT ACCUMULATE POINTS. There is a 10-point penalty for every race with the incorrect banner.
 
 1.6. Must have a Trading paints account with an uploaded paint scheme. It is free: https://www.tradingpaints.com/
 
