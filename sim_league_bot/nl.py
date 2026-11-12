@@ -214,7 +214,8 @@ async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None,
         "the book doesn't support. For a schedule question: answer ONLY from the SCHEDULE below. It lists "
         "dates, tracks, stage and lap counts and nothing else - if asked something it doesn't contain "
         "(start time, year, car setup, practice/qualifying), say it isn't listed and point them to the "
-        "admins rather than guessing. Today's date is "
+        "admins rather than guessing. This is a Discord chat: keep replies tight (a few short paragraphs, "
+        "ideally under 1500 characters) unless asked for a full review, and use plain markdown only. Today's date is "
         f"{date.today().isoformat()}.\n\n"
         f"SCHEDULE:\n{_load_schedule()}\n\n"
         f"RULE BOOK:\n{rules.load_rulebook_text()}"
@@ -224,7 +225,7 @@ async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None,
         response = await asyncio.to_thread(
             _client().messages.create,
             model=MAIN_MODEL,
-            max_tokens=1024,
+            max_tokens=2048,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             tools=TOOLS + ([REPORT_TOOL] if allow_report else []),
             messages=(history or []) + [{"role": "user", "content": text + (f"\n\n[The driver attached {len(attachments)} file(s) to this message.]" if attachments else "")}],
@@ -267,6 +268,25 @@ def _is_admin_chat(message: discord.Message, client: discord.Client) -> bool:
     if getattr(message.channel, "name", None) != channel_name:
         return False
     return client.user is not None and client.user in message.mentions
+
+
+DISCORD_LIMIT = 2000
+
+
+def _chunks(text: str, limit: int = 1900) -> list:
+    """Split a long reply into <= limit pieces, preferring paragraph, then
+    line, then word boundaries (Discord rejects messages over 2000 chars)."""
+    text = text.strip()
+    parts = []
+    while len(text) > limit:
+        cut = max(text.rfind("\n\n", 0, limit), text.rfind("\n", 0, limit), text.rfind(" ", 0, limit))
+        if cut < limit // 2:
+            cut = limit
+        parts.append(text[:cut].rstrip())
+        text = text[cut:].lstrip()
+    if text:
+        parts.append(text)
+    return parts or [""]
 
 
 def _strip_mentions(text: str, client: discord.Client) -> str:
@@ -318,10 +338,14 @@ async def handle(message: discord.Message, client: discord.Client) -> None:
         allow_report=not admin_chat,
         history=history,
     )
+    pieces = _chunks(result.reply)
     if admin_chat:
-        await message.reply(result.reply, mention_author=False)
+        await message.reply(pieces[0], mention_author=False)
+        for extra in pieces[1:]:
+            await message.channel.send(extra)
     else:
-        await message.channel.send(result.reply)
+        for piece in pieces:
+            await message.channel.send(piece)
         # A filed report ends the thread (don't let a later message re-file it);
         # otherwise remember the exchange. Errors aren't remembered.
         filed = any(var == "ADMIN_CHAT_CHANNEL_NAME" for _, var in result.notifications)
