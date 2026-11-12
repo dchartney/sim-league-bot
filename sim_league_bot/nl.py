@@ -23,6 +23,7 @@ import asyncio
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -103,6 +104,34 @@ REPORT_TOOL = {
     },
 }
 
+# Short-lived per-user DM memory, so follow-ups ("it happened today, in voice
+# chat") are understood and don't get re-classified as off-topic on their own.
+# In-process only (lost on restart, which is fine), keyed by Discord user ID.
+HISTORY_TTL_SECONDS = 30 * 60
+HISTORY_MAX_MESSAGES = 10  # 5 exchanges
+_history: dict = {}  # user_id -> [(timestamp, role, content), ...]
+
+
+def _get_history(user_id: str) -> list:
+    """Recent messages as Anthropic-format dicts (user/assistant alternating,
+    starting with user). Expired entries are dropped."""
+    cutoff = time.time() - HISTORY_TTL_SECONDS
+    entries = [e for e in _history.get(user_id, []) if e[0] >= cutoff]
+    _history[user_id] = entries
+    return [{"role": role, "content": content} for _, role, content in entries]
+
+
+def _remember(user_id: str, user_text: str, reply: str) -> None:
+    now = time.time()
+    entries = _history.get(user_id, [])
+    entries += [(now, "user", user_text), (now, "assistant", reply)]
+    _history[user_id] = entries[-HISTORY_MAX_MESSAGES:]
+
+
+def _forget(user_id: str) -> None:
+    _history.pop(user_id, None)
+
+
 _anthropic: Optional[Anthropic] = None
 
 
@@ -126,8 +155,9 @@ async def classify_in_scope(text: str) -> bool:
             max_tokens=10,
             system=(
                 "Reply with exactly one word: SCOPE or OTHER. SCOPE if the message is a question about the "
-                "SCSRA iRacing league's race schedule, or a rules/ruling question about a racing scenario. "
-                "OTHER for anything else (chitchat, unrelated topics, testing the bot, etc)."
+                "SCSRA iRacing league's race schedule, a rules/ruling question about a racing scenario, or a "
+                "request to report/complain to the league admins about a driver, harassment, abusive language "
+                "or conduct. OTHER for anything else (chitchat, unrelated topics, testing the bot, etc)."
             ),
             messages=[{"role": "user", "content": text}],
         )
@@ -171,7 +201,7 @@ def _dispatch_tool(name: str, tool_input: dict, reporter_name: str, reporter_id:
     return None, None, None
 
 
-async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None, allow_report: bool = False) -> AskResult:
+async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None, allow_report: bool = False, history=None) -> AskResult:
     """The expensive call: whole rule book in context (cached), Ricky's
     persona, tools for escalation/feedback. Caller is responsible for the
     cost gate (classify_in_scope for free-text DMs) and the rate limit
@@ -197,7 +227,7 @@ async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None,
             max_tokens=1024,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             tools=TOOLS + ([REPORT_TOOL] if allow_report else []),
-            messages=[{"role": "user", "content": text + (f"\n\n[The driver attached {len(attachments)} file(s) to this message.]" if attachments else "")}],
+            messages=(history or []) + [{"role": "user", "content": text + (f"\n\n[The driver attached {len(attachments)} file(s) to this message.]" if attachments else "")}],
         )
     except Exception as exc:
         print(f"WARN: main NL call failed: {exc}", file=sys.stderr)
@@ -267,7 +297,12 @@ async def handle(message: discord.Message, client: discord.Client) -> None:
 
     # Admin chat skips the cost-gate classifier (trusted channel; also lets
     # "introduce yourself" and other chit-chat through). Rate limit still applies.
-    if not admin_chat and not await classify_in_scope(text):
+    # A DM that continues a live conversation (history within the last 30 min)
+    # also skips the classifier: a follow-up like "it happened in voice chat"
+    # can't be judged in-scope on its own. The rate limit still bounds cost and
+    # the system prompt still scopes the answer.
+    history = [] if admin_chat else _get_history(user_id)
+    if not admin_chat and not history and not await classify_in_scope(text):
         await message.channel.send(voice.OFF_TOPIC)
         return
 
@@ -281,9 +316,17 @@ async def handle(message: discord.Message, client: discord.Client) -> None:
         user_id,
         attachments=[a.url for a in message.attachments],
         allow_report=not admin_chat,
+        history=history,
     )
     if admin_chat:
         await message.reply(result.reply, mention_author=False)
     else:
         await message.channel.send(result.reply)
+        # A filed report ends the thread (don't let a later message re-file it);
+        # otherwise remember the exchange. Errors aren't remembered.
+        filed = any(var == "ADMIN_CHAT_CHANNEL_NAME" for _, var in result.notifications)
+        if filed:
+            _forget(user_id)
+        elif result.reply != voice.BROKE:
+            _remember(user_id, text, result.reply)
     await send_notifications(client, result)
