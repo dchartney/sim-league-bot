@@ -178,7 +178,7 @@ def _dispatch_tool(name: str, tool_input: dict, reporter_name: str, reporter_id:
     """Returns (result_text_or_None, notify_text_or_None, notify_channel_env_var_or_None)."""
     if name == "report_to_admins":
         summary = tool_input.get("summary", "")[:1500]
-        lines = [f"**Driver report** from {reporter_name} (<@{reporter_id}>)"]
+        lines = [f"{discordchan.ROLE_PLACEHOLDER} **Driver report** from {reporter_name} (<@{reporter_id}>)"]
         if tool_input.get("driver_involved"):
             lines.append(f"Driver involved: {tool_input['driver_involved'][:100]}")
         lines.append(summary)
