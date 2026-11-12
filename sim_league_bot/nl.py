@@ -21,6 +21,7 @@ call just by asking anyway. The classifier is what actually caps spend.
 """
 import asyncio
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
@@ -168,18 +169,49 @@ async def send_notifications(client: discord.Client, result: AskResult) -> None:
         await discordchan.post(client, channel_var, notify)
 
 
+def _is_admin_chat(message: discord.Message, client: discord.Client) -> bool:
+    """True for an @mention of the bot inside the one admin chat channel
+    (ADMIN_CHAT_CHANNEL_NAME). Who can talk there is controlled by the
+    channel's Discord permissions, not by admins.json (IDs are still null).
+    Every other server channel stays ignored - DMs plus this one channel
+    are the only natural-language entry points."""
+    channel_name = os.environ.get("ADMIN_CHAT_CHANNEL_NAME")
+    if not channel_name or message.guild is None:
+        return False
+    if getattr(message.channel, "name", None) != channel_name:
+        return False
+    return client.user is not None and client.user in message.mentions
+
+
+def _strip_mentions(text: str, client: discord.Client) -> str:
+    if client.user is not None:
+        text = re.sub(rf"<@!?{client.user.id}>", "", text)
+    return text.strip()
+
+
 async def handle(message: discord.Message, client: discord.Client) -> None:
-    if not isinstance(message.channel, discord.DMChannel):
-        return  # DMs only - no public ask channel
     if message.author.bot:
         return
 
-    text = message.content.strip()
+    if isinstance(message.channel, discord.DMChannel):
+        admin_chat = False
+    elif _is_admin_chat(message, client):
+        admin_chat = True
+    else:
+        return  # DMs and the admin chat channel only - no public ask channel
+
+    text = _strip_mentions(message.content, client) if admin_chat else message.content.strip()
+    if admin_chat and not text:
+        text = "Introduce yourself to the admin team."
     if not text:
         return
 
     user_id = str(message.author.id)
-    if not await classify_in_scope(text):
+    print(f"INFO: NL message from {user_id} ({'admin chat' if admin_chat else 'DM'}, {len(text)} chars)", file=sys.stderr)
+
+    # Admin chat skips the cost-gate classifier (trusted channel; also lets
+    # "introduce yourself" and other chit-chat through). Rate limit still applies.
+    if not admin_chat and not await classify_in_scope(text):
         await message.channel.send(voice.OFF_TOPIC)
         return
 
@@ -188,5 +220,8 @@ async def handle(message: discord.Message, client: discord.Client) -> None:
         return
 
     result = await ask(text, message.author.display_name, user_id)
-    await message.channel.send(result.reply)
+    if admin_chat:
+        await message.reply(result.reply, mention_author=False)
+    else:
+        await message.channel.send(result.reply)
     await send_notifications(client, result)
