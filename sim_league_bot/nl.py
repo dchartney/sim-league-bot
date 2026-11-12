@@ -75,17 +75,22 @@ def _load_schedule() -> str:
 
 
 # Only offered in DMs (a report from inside the admin channel would just post
-# to itself). Rule 12.1 of the rule book is the real complaint process: video
-# evidence + the exact wording of the issue, sent to the admin team.
+# to itself). Rule 12.1 of the rule book is the on-track complaint process
+# (video evidence + exact wording to the admin team), but David's decision:
+# evidence is NEVER a gate - harassment/verbal abuse may have no recording and
+# must still reach the admins.
 REPORT_TOOL = {
     "name": "report_to_admins",
     "description": (
         "Send a report or complaint from the driver to the admin team's channel. Use when a driver wants to "
-        "report another driver, an on-track incident, or anything else for the admins to review. Rule 12.1 asks "
-        "for video evidence and the exact wording of the issue: if the driver has not given a clip/link "
-        "(or attached one) and the exact complaint, ask for them FIRST, once; if they say they have none or "
-        "just want it sent, send it anyway. Do not use this for ambiguous rule questions (use escalate_ruling) "
-        "or bot bugs/ideas (use report_bug / request_feature)."
+        "report another driver, an on-track incident, harassment or verbal abuse (including in voice chat or "
+        "anywhere else with no recording), or anything else for the admins to review. NEVER refuse or delay a "
+        "report for lack of video or other evidence - the admins want these regardless. If the report is thin, "
+        "ask ONCE for the useful details (who, when, which race/where, what was said or happened, and a "
+        "clip/link/screenshot if they happen to have one, mentioning rule 12.1 asks for video of on-track "
+        "issues but it is optional); if they have nothing more or just want it sent, file it right away. "
+        "Do not use this for ambiguous rule questions (use escalate_ruling) or bot bugs/ideas "
+        "(use report_bug / request_feature)."
     ),
     "input_schema": {
         "type": "object",
