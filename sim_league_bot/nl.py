@@ -316,7 +316,22 @@ def _is_admin_chat(message: discord.Message, client: discord.Client) -> bool:
         return False
     if getattr(message.channel, "name", None) != channel_name:
         return False
-    return client.user is not None and client.user in message.mentions
+    return _mentions_bot(message, client)
+
+
+def _bot_role_ids(message: discord.Message) -> set:
+    """IDs of the roles the bot itself holds in this server (including its
+    auto-created managed role, which Discord's autocomplete also offers under
+    the bot's name)."""
+    me = message.guild.me if message.guild else None
+    return {r.id for r in getattr(me, "roles", [])} if me else set()
+
+
+def _mentions_bot(message: discord.Message, client: discord.Client) -> bool:
+    if client.user is not None and client.user in message.mentions:
+        return True
+    mentioned_roles = {r.id for r in message.role_mentions}
+    return bool(mentioned_roles & _bot_role_ids(message))
 
 
 DISCORD_LIMIT = 2000
@@ -341,7 +356,11 @@ def _chunks(text: str, limit: int = 1900) -> list:
 def _strip_mentions(text: str, client: discord.Client) -> str:
     if client.user is not None:
         text = re.sub(rf"<@!?{client.user.id}>", "", text)
+    text = re.sub(r"<@&\d+>", lambda m: "" if int(m.group(0)[3:-1]) in _STRIP_ROLE_IDS else m.group(0), text)
     return text.strip()
+
+
+_STRIP_ROLE_IDS: set = set()  # filled per message in handle() with the bot's own role IDs
 
 
 async def handle(message: discord.Message, client: discord.Client) -> None:
@@ -353,8 +372,17 @@ async def handle(message: discord.Message, client: discord.Client) -> None:
     elif _is_admin_chat(message, client):
         admin_chat = True
     else:
-        return  # DMs and the admin chat channel only - no public ask channel
+        # DMs and the admin chat channel only - no public ask channel. Log why a
+        # message that DID mention the bot was ignored (no message content).
+        if message.guild is not None and _mentions_bot(message, client):
+            print(f"INFO: ignored a mention of the bot in #{getattr(message.channel, 'name', '?')} "
+                  f"(type {type(message.channel).__name__}); admin chat channel is "
+                  f"#{os.environ.get('ADMIN_CHAT_CHANNEL_NAME')}", file=sys.stderr)
+        return
 
+    _STRIP_ROLE_IDS.clear()
+    if admin_chat:
+        _STRIP_ROLE_IDS.update(_bot_role_ids(message))
     text = _strip_mentions(message.content, client) if admin_chat else message.content.strip()
     if admin_chat and not text:
         text = "Introduce yourself to the admin team."
