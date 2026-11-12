@@ -6,6 +6,8 @@ settled on a number yet) - tune via RULING_RATE_LIMIT / RULING_RATE_WINDOW_SECON
 import os
 import time
 
+from . import admins
+
 _hits: dict = {}
 
 
@@ -18,6 +20,10 @@ def _window() -> int:
 
 
 def allow(user_id: str) -> bool:
+    # League admins (admins.json) are exempt from the limit. The limit exists
+    # to cap spend from the open server, and admins are a small trusted group.
+    if admins.is_admin(user_id):
+        return True
     now = time.time()
     window = _window()
     hits = [t for t in _hits.get(user_id, []) if now - t < window]
