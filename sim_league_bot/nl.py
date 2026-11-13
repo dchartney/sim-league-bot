@@ -32,7 +32,7 @@ from typing import Optional
 import discord
 from anthropic import Anthropic
 
-from . import admins, discordchan, feedback, profiles, ratelimit, rule_changes, rule_chat, rules, voice
+from . import admins, discordchan, feedback, profiles, ratelimit, reviews, rule_changes, rule_chat, rules, voice
 
 CLASSIFY_MODEL = "claude-haiku-4-5"
 MAIN_MODEL = "claude-opus-4-5"
@@ -169,6 +169,37 @@ RULE_TOOL = {
     },
 }
 
+# Admin-chat only (same gate as RULE_TOOL). These only touch the separate
+# review-notes file, never the rule text, so they run immediately.
+REVIEW_TOOLS = [
+    {
+        "name": "flag_rule_for_review",
+        "description": (
+            "Mark a rule for review with a note, when an admin says they want to flag / mark / note a rule to "
+            "revisit. Call once per rule (several times if they flag several). Use the exact rule number as the "
+            "admin gave it (e.g. 3.4.2) and keep their note in their own words."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"rule": {"type": "string", "description": "Rule number, e.g. 3.4.2"},
+                           "note": {"type": "string", "description": "Why it needs review"}},
+            "required": ["rule", "note"],
+        },
+    },
+    {
+        "name": "list_review_flags",
+        "description": "List rules flagged for review. Use when an admin asks what is flagged / still needs review.",
+        "input_schema": {"type": "object", "properties": {"include_resolved": {"type": "boolean"}}},
+    },
+    {
+        "name": "resolve_review_flag",
+        "description": "Mark a review flag as done, by its flag id number (e.g. #7 -> 7). Optional short resolution note.",
+        "input_schema": {"type": "object",
+                         "properties": {"id": {"type": "integer"}, "resolution": {"type": "string"}},
+                         "required": ["id"]},
+    },
+]
+
 _anthropic: Optional[Anthropic] = None
 
 
@@ -215,6 +246,18 @@ class AskResult:
 
 def _dispatch_tool(name: str, tool_input: dict, reporter_name: str, reporter_id: str, attachments=None) -> tuple:
     """Returns (result_text_or_None, notify_text_or_None, notify_channel_env_var_or_None)."""
+    if name == "flag_rule_for_review":
+        item, msg = reviews.add(tool_input.get("rule", ""), tool_input.get("note", ""), reporter_name, reporter_id)
+        return msg, (reviews.mirror_flagged(item) if item else None), "RULE_REVIEW_CHANNEL_NAME"
+    if name == "list_review_flags":
+        return reviews.format_list(reviews.list_items(bool(tool_input.get("include_resolved")))), None, None
+    if name == "resolve_review_flag":
+        try:
+            flag_id = int(tool_input.get("id"))
+        except (TypeError, ValueError):
+            return "I need the flag number to resolve.", None, None
+        item, msg = reviews.resolve(flag_id, reporter_name, tool_input.get("resolution", ""))
+        return msg, (reviews.mirror_resolved(item, reporter_name) if item else None), "RULE_REVIEW_CHANNEL_NAME"
     if name == "report_to_admins":
         summary = tool_input.get("summary", "")[:1500]
         lines = [f"{discordchan.ROLE_PLACEHOLDER} **Driver report** from {reporter_name} (<@{reporter_id}>)"]
@@ -268,7 +311,7 @@ async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None,
             model=MAIN_MODEL,
             max_tokens=2048,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-            tools=TOOLS + ([REPORT_TOOL] if allow_report else []) + ([RULE_TOOL] if allow_rule_edit else []),
+            tools=TOOLS + ([REPORT_TOOL] if allow_report else []) + ([RULE_TOOL] + REVIEW_TOOLS if allow_rule_edit else []),
             messages=(history or []) + [{"role": "user", "content": text + (f"\n\n[The driver attached {len(attachments)} file(s) to this message.]" if attachments else "")}],
         )
     except Exception as exc:
@@ -280,6 +323,7 @@ async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None,
     draft_reply = None
     proposal = None
     notifications = []
+    review_lines = None
     for block in response.content:
         if block.type == "text":
             draft_reply = block.text
@@ -294,7 +338,14 @@ async def ask(text: str, reporter_name: str, reporter_id: str, attachments=None,
         elif block.type == "tool_use":
             result, notify, channel_var = _dispatch_tool(block.name, block.input, reporter_name, reporter_id, attachments)
             if result:
-                draft_reply = result
+                # Several flags in one message: keep every confirmation, not just the last.
+                if block.name in ("flag_rule_for_review", "resolve_review_flag") and review_lines is not None:
+                    review_lines.append(result)
+                    draft_reply = "\n".join(review_lines)
+                else:
+                    draft_reply = result
+                    if block.name in ("flag_rule_for_review", "resolve_review_flag"):
+                        review_lines = [result]
             if notify and channel_var:
                 notifications.append((notify, channel_var))
 

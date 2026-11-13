@@ -10,7 +10,7 @@ from typing import Optional
 import discord
 from discord import app_commands
 
-from . import admins, discordchan, feedback, nl, numbers, profiles, ratelimit, rule_edit, rules, voice, results
+from . import admins, discordchan, feedback, nl, numbers, profiles, ratelimit, reviews, rule_edit, rules, voice, results
 
 
 def _caller_id(interaction: discord.Interaction) -> str:
@@ -87,6 +87,39 @@ def setup(tree: app_commands.CommandTree) -> None:
             diff = rules.diff_since(since.strip())
             return f"```diff\n{diff[:1900]}\n```" if diff else f"No rule changes since {since}."
         await _run_text(interaction, work, ephemeral=True)
+
+    def _admin_only(interaction: discord.Interaction) -> bool:
+        return admins.is_admin(_caller_id(interaction))
+
+    @rule_group.command(name="flag", description="(Admin) Flag a rule for review with a note")
+    @app_commands.describe(number="The rule number, e.g. 3.4.2", note="Why it needs review")
+    async def rule_flag_cmd(interaction: discord.Interaction, number: str, note: str):
+        if not _admin_only(interaction):
+            await interaction.response.send_message("Only an admin can do that.", ephemeral=True)
+            return
+        item, msg = reviews.add(number, note, interaction.user.display_name, _caller_id(interaction))
+        await interaction.response.send_message(msg, ephemeral=True)
+        if item:
+            await discordchan.post(interaction.client, "RULE_REVIEW_CHANNEL_NAME", reviews.mirror_flagged(item))
+
+    @rule_group.command(name="flags", description="(Admin) List rules flagged for review")
+    @app_commands.describe(include_resolved="Also show resolved flags")
+    async def rule_flags_cmd(interaction: discord.Interaction, include_resolved: bool = False):
+        if not _admin_only(interaction):
+            await interaction.response.send_message("Only an admin can do that.", ephemeral=True)
+            return
+        await interaction.response.send_message(reviews.format_list(reviews.list_items(include_resolved)), ephemeral=True)
+
+    @rule_group.command(name="resolve", description="(Admin) Mark a review flag as resolved")
+    @app_commands.describe(flag="The flag number, e.g. 7", resolution="Optional note on what was decided")
+    async def rule_resolve_cmd(interaction: discord.Interaction, flag: int, resolution: Optional[str] = None):
+        if not _admin_only(interaction):
+            await interaction.response.send_message("Only an admin can do that.", ephemeral=True)
+            return
+        item, msg = reviews.resolve(flag, interaction.user.display_name, resolution or "")
+        await interaction.response.send_message(msg, ephemeral=True)
+        if item:
+            await discordchan.post(interaction.client, "RULE_REVIEW_CHANNEL_NAME", reviews.mirror_resolved(item, interaction.user.display_name))
 
     @results_group.command(name="post", description="(Admin) Post the latest race results and season standings")
     async def results_post_cmd(interaction: discord.Interaction):

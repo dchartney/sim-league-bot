@@ -5,3 +5,4 @@ __pycache__/
 .venv/
 profiles.json
 numbers.md
+review-notes.json
