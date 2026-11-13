@@ -1,11 +1,12 @@
 """Entrypoint: load secrets/config, wire up slash commands + the DM NL
 handler, run the bot."""
+import os
 import sys
 
 import discord
 from discord import app_commands
 
-from . import commands, discordchan, feedback, nl, secrets, voice
+from . import commands, discordchan, feedback, nl, profiles, secrets, voice
 
 
 def main() -> None:
@@ -15,6 +16,11 @@ def main() -> None:
 
     intents = discord.Intents.default()
     intents.message_content = True
+    # Server Members is a PRIVILEGED intent: it must be switched on in the Discord
+    # developer portal first, otherwise login fails. Hence the opt-in flag.
+    profile_on_join = os.environ.get("PROFILE_ON_JOIN", "").lower() in ("1", "true", "yes")
+    if profile_on_join:
+        intents.members = True
     bot = discord.Client(intents=intents)
     tree = app_commands.CommandTree(bot)
     commands.setup(tree)
@@ -23,6 +29,15 @@ def main() -> None:
     async def on_ready():
         await tree.sync()
         print(f"INFO: logged in as {bot.user}", file=sys.stderr)
+
+    if profile_on_join:
+        @bot.event
+        async def on_member_join(member: discord.Member):
+            try:
+                status = await profiles.start(member, bot)
+                print(f"INFO: new member {member.id}: {status}", file=sys.stderr)
+            except Exception as exc:
+                print(f"ERROR: profile start failed for {member.id}: {exc!r}", file=sys.stderr)
 
     @bot.event
     async def on_message(message: discord.Message):

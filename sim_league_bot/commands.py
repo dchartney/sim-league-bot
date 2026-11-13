@@ -9,7 +9,7 @@ from typing import Optional
 import discord
 from discord import app_commands
 
-from . import admins, discordchan, feedback, nl, ratelimit, rule_edit, rules, voice, results
+from . import admins, discordchan, feedback, nl, profiles, ratelimit, rule_edit, rules, voice, results
 
 
 def _caller_id(interaction: discord.Interaction) -> str:
@@ -116,5 +116,17 @@ def setup(tree: app_commands.CommandTree) -> None:
         await interaction.response.defer(ephemeral=True)
         await interaction.followup.send(await work(), ephemeral=True)
 
-    for group in (rule_group, results_group, feedback_group):
+    profile_group = app_commands.Group(name="profile", description="New-driver profile interviews")
+
+    @profile_group.command(name="start", description="(Admin) DM a member Ricky's driver-profile interview")
+    @app_commands.describe(member="Who to interview (restarts it if they already did one)")
+    async def profile_start_cmd(interaction: discord.Interaction, member: discord.Member):
+        if not admins.is_admin(_caller_id(interaction)):
+            await interaction.response.send_message("Only an admin can do that.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        status = await profiles.start(member, interaction.client, force=True)
+        await interaction.followup.send(status, ephemeral=True)
+
+    for group in (rule_group, results_group, feedback_group, profile_group):
         tree.add_command(group)

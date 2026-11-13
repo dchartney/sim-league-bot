@@ -32,7 +32,7 @@ from typing import Optional
 import discord
 from anthropic import Anthropic
 
-from . import admins, discordchan, feedback, ratelimit, rule_changes, rule_chat, rules, voice
+from . import admins, discordchan, feedback, profiles, ratelimit, rule_changes, rule_chat, rules, voice
 
 CLASSIFY_MODEL = "claude-haiku-4-5"
 MAIN_MODEL = "claude-opus-4-5"
@@ -87,7 +87,8 @@ REPORT_TOOL = {
         "report another driver, an on-track incident, harassment or verbal abuse (including in voice chat or "
         "anywhere else with no recording), or anything else for the admins to review. NEVER refuse or delay a "
         "report for lack of video or other evidence - the admins want these regardless. If the report is thin, "
-        "ask ONCE for the useful details (who, when, which race/where, what was said or happened, and a "
+        "ask ONCE for the useful details (who, when, which race/where, and for an on-track incident ALWAYS ask "
+        "which lap it happened on, what was said or happened, and a "
         "clip/link/screenshot if they happen to have one, mentioning rule 12.1 asks for video of on-track "
         "issues but it is optional); if they have nothing more or just want it sent, file it right away. "
         "Do not use this for ambiguous rule questions (use escalate_ruling) or bot bugs/ideas "
@@ -390,6 +391,9 @@ async def handle(message: discord.Message, client: discord.Client) -> None:
         return
 
     user_id = str(message.author.id)
+    # A DM from someone mid new-driver interview goes to the interview, not the Q&A flow.
+    if not admin_chat and await profiles.handle_reply(message, client):
+        return
     print(f"INFO: NL message from {user_id} ({'admin chat' if admin_chat else 'DM'}, {len(text)} chars)", file=sys.stderr)
 
     # Admin chat skips the cost-gate classifier (trusted channel; also lets

@@ -3,3 +3,4 @@ feedback.json
 __pycache__/
 *.pyc
 .venv/
+profiles.json
