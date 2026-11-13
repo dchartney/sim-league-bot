@@ -28,7 +28,7 @@ os.environ.setdefault("SIGNUP_CHANNEL_NAME", "season-13-signup-list")
 HISTORY_LIMIT = 1000
 
 _NUM = re.compile(r"(?<![\d/.:\w])#?(\d{1,3})(?![\d/:\w]|\.\d)")
-_HEADER = re.compile(r"(season|sign\s?-?ups?|list|roster|registered|drivers?)", re.I)
+_HEADER = re.compile(r"\b(season|sign\s?-?ups?|list|roster|registered|drivers?)\b", re.I)
 _STRIP = re.compile(r"[\*_`~|>\-–—:#,]+")
 
 
