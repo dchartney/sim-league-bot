@@ -117,7 +117,7 @@ def setup(tree: app_commands.CommandTree) -> None:
         await interaction.response.defer(ephemeral=True)
         await interaction.followup.send(await work(), ephemeral=True)
 
-    @tree.command(name="new-member", description="(Admin) Simulate a new member joining: DMs them Ricky's driver-profile interview")
+    @tree.command(name="new-member-test", description="(Admin) Simulate a new member joining: DMs them Ricky's driver-profile interview")
     @app_commands.describe(member="Who to run it on (defaults to you). Restarts it if they already did one.")
     async def new_member_cmd(interaction: discord.Interaction, member: Optional[discord.Member] = None):
         if not admins.is_admin(_caller_id(interaction)):
@@ -126,7 +126,7 @@ def setup(tree: app_commands.CommandTree) -> None:
         await interaction.response.defer(ephemeral=True)
         target = member or interaction.user
         status = await profiles.start(target, interaction.client, force=True)
-        await interaction.followup.send(f"{status} (Answers will post to #{os.environ.get('PROFILE_CHANNEL_NAME', 'driver-profiles')}.)", ephemeral=True)
+        await interaction.followup.send(f"{status} (Answers will post to #{os.environ.get('PROFILE_CHANNEL_NAME', 'new-driver-profiles')}.)", ephemeral=True)
 
     for group in (rule_group, results_group, feedback_group):
         tree.add_command(group)

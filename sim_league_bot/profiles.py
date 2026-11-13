@@ -5,7 +5,7 @@ DMs them and runs a short, conversational interview: racing background, home
 track, favourite car, a proud/painful moment, why they joined, a fun fact.
 When it's done the bot posts the questions asked, the driver's answers and a
 DRAFT promo tweet to the admin-category channel PROFILE_CHANNEL_NAME (default
-"driver-profiles") for Devin to review and adjust. Nothing is posted publicly
+"new-driver-profiles") for Devin to review and adjust. Nothing is posted publicly
 and nothing is tweeted - it's for driver/server engagement.
 
 The driver can say "skip" at any point (or just ignore the DM; sessions expire
@@ -32,7 +32,7 @@ PROFILE_MODEL = "claude-haiku-4-5"
 STATE_PATH = Path(__file__).resolve().parent.parent / "profiles.json"
 SESSION_TTL_SECONDS = 7 * 24 * 3600
 MAX_DRIVER_REPLIES = 20
-os.environ.setdefault("PROFILE_CHANNEL_NAME", "driver-profiles")
+os.environ.setdefault("PROFILE_CHANNEL_NAME", "new-driver-profiles")
 
 SYSTEM = (
     f"{voice.PERSONA}\n\n"
