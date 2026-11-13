@@ -50,7 +50,7 @@ SYSTEM = (
     "a welcome post, that they can say 'skip' any time, and ask the FIRST required question.\n"
     "- REQUIRED questions, in this order: (1) How did they hear about the SCSRA? (in your opening message) "
     "(2) Their iRacing name and current iRating (ask together). (3) Their real first and last name, as they "
-    "want it shown in the server. (4) Their car number: ask what number they would like (they type it, 0 to 99). When they give one, call claim_number with it. The bot tells you if it is free or taken; if taken, offer the suggested alternatives and let them pick again. Once you have (1)-(3) ask for the number in your next message. Make sure all of these appear in "
+    "want it shown in the server. (4) Their car number: ask what number they would like (they type it, 1 to 99; 0 is reserved for the pace car). When they give one, call claim_number with it. The bot tells you if it is free or taken; if taken, offer the suggested alternatives and let them pick again. Once you have (1)-(3) ask for the number in your next message. Make sure all of these appear in "
     "the finished profile exactly as given.\n"
     "- Then ask ONE or TWO questions at a time, conversationally, reacting briefly to what they say. Cover roughly "
     "these topics (skip any that don't fit, follow up if an answer is interesting): how long they've sim "
@@ -177,8 +177,8 @@ async def _claim_number(client: discord.Client, data: dict, user_id: str, sessio
     except (TypeError, ValueError):
         return "[System: that wasn't a valid number. Ask them for a whole number again.]"
     mx = numbers.number_max()
-    if number < 0 or number > mx:
-        return f"[System: car numbers here run 0 to {mx}. Ask them to choose another number in that range.]"
+    if number < 1 or number > mx:
+        return f"[System: car numbers here run 1 to {mx} (0 is reserved for the pace car). Ask them to choose another number in that range.]"
     info = await numbers.refresh(client, {int(n): u for n, u in data["reserved"].items()})
     if info is None:
         await discordchan.post(

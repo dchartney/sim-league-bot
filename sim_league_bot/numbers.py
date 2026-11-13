@@ -125,6 +125,6 @@ async def refresh(client: discord.Client, extra_reserved: Optional[dict] = None)
 
 
 def free_numbers(taken: dict, reserved: dict, user_id: str) -> list:
-    """Numbers 0..NUMBER_MAX not taken and not reserved by someone else."""
+    """Numbers 1..NUMBER_MAX (0 is the pace car) not taken and not reserved by someone else."""
     blocked = set(taken) | {int(n) for n, uid in reserved.items() if uid != user_id}
-    return [n for n in range(0, number_max() + 1) if n not in blocked]
+    return [n for n in range(1, number_max() + 1) if n not in blocked]
