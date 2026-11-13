@@ -3,7 +3,7 @@
 When someone joins the SCSRA Discord (or an admin runs /new-member-test),
 Ricky DMs them and runs a short, conversational interview. Required, in order:
 how they heard about the SCSRA; iRacing name + iRating; first/last name; car
-number (picked from a two-step dropdown of numbers still free - see
+number (typed by the driver, checked live against the signup list - see
 numbers.py); then a few fun questions. When it's done the bot posts the
 answers, a DRAFT promo tweet and a PROPOSED server nickname
 ("First Last #Number") to the admin-category channel PROFILE_CHANNEL_NAME
@@ -14,9 +14,7 @@ publicly.
 The driver can say "skip" at any point (or ignore the DM; sessions expire
 after 7 days). State lives in profiles.json (gitignored) so a restart
 mid-interview doesn't lose the conversation. The nickname Confirm/Reject
-buttons are persistent (discord.py DynamicItem), so they survive restarts;
-the number dropdown does not, but Ricky re-sends it on the driver's next
-message.
+buttons are persistent (discord.py DynamicItem), so they survive restarts.
 
 Cost bounds: the cheap model, no rule book in context, a hard cap on driver
 replies per interview, and one interview per member.
@@ -52,9 +50,7 @@ SYSTEM = (
     "a welcome post, that they can say 'skip' any time, and ask the FIRST required question.\n"
     "- REQUIRED questions, in this order: (1) How did they hear about the SCSRA? (in your opening message) "
     "(2) Their iRacing name and current iRating (ask together). (3) Their real first and last name, as they "
-    "want it shown in the server. (4) Their car number: do NOT ask them to type one; once you have (1)-(3), "
-    "call choose_number and the bot shows them a dropdown of free numbers. After they pick, you will get a "
-    "system message with the number; acknowledge it briefly and carry on. Make sure all of these appear in "
+    "want it shown in the server. (4) Their car number: ask what number they would like (they type it, 0 to 99). When they give one, call claim_number with it. The bot tells you if it is free or taken; if taken, offer the suggested alternatives and let them pick again. Once you have (1)-(3) ask for the number in your next message. Make sure all of these appear in "
     "the finished profile exactly as given.\n"
     "- Then ask ONE or TWO questions at a time, conversationally, reacting briefly to what they say. Cover roughly "
     "these topics (skip any that don't fit, follow up if an answer is interesting): how long they've sim "
@@ -75,11 +71,10 @@ SYSTEM = (
 
 TOOLS = [
     {
-        "name": "choose_number",
-        "description": "Show the driver a dropdown of car numbers that are still free. Call once you have how they "
-                       "heard about SCSRA, their iRacing name/iRating and their first/last name. Include a short "
-                       "text asking them to pick below.",
-        "input_schema": {"type": "object", "properties": {}},
+        "name": "claim_number",
+        "description": "Check and reserve the car number the driver typed. Call it as soon as they give a number "
+                       "(after you have asked for their first choice). The bot replies with whether it is free.",
+        "input_schema": {"type": "object", "properties": {"number": {"type": "integer"}}, "required": ["number"]},
     },
     {
         "name": "finish_profile",
@@ -112,7 +107,6 @@ TOOLS = [
 ]
 
 _anthropic: Optional[Anthropic] = None
-_live_views: set = set()  # user_ids with a number dropdown currently alive in this process
 
 
 def _client() -> Anthropic:
@@ -174,98 +168,39 @@ def _split(response):
     return text, tool
 
 
-# ---- number picker ---------------------------------------------------------
+# ---- car number claim ------------------------------------------------------
 
-def _range_label(start: int, mx: int) -> str:
-    return f"{start}-{min(start + 24, mx)}"
-
-
-class _NumberSelect(discord.ui.Select):
-    def __init__(self, user_id: str, nums: list):
-        super().__init__(placeholder="Pick your car number", min_values=1, max_values=1,
-                         options=[discord.SelectOption(label=f"#{n}", value=str(n)) for n in nums[:25]])
-        self.user_id = user_id
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        await _picked(interaction, self.user_id, int(self.values[0]))
-
-
-class _RangeSelect(discord.ui.Select):
-    def __init__(self, user_id: str, free: list):
-        mx = numbers.number_max()
-        options = []
-        for start in range(0, mx + 1, 25):
-            count = len([n for n in free if start <= n < start + 25])
-            if count:
-                options.append(discord.SelectOption(label=f"{_range_label(start, mx)} ({count} free)", value=str(start)))
-        super().__init__(placeholder="Pick a number range", min_values=1, max_values=1, options=options[:25])
-        self.user_id = user_id
-        self.free = free
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        start = int(self.values[0])
-        nums = [n for n in self.free if start <= n < start + 25]
-        view = _PickerView(self.user_id)
-        view.add_item(_NumberSelect(self.user_id, nums))
-        await interaction.response.edit_message(
-            content=f"Numbers free in {_range_label(start, numbers.number_max())}. Pick one:", view=view)
-
-
-class _PickerView(discord.ui.View):
-    def __init__(self, user_id: str):
-        super().__init__(timeout=30 * 60)
-        self.user_id = user_id
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        return str(interaction.user.id) == self.user_id
-
-    async def on_timeout(self) -> None:
-        _live_views.discard(self.user_id)
-
-
-async def _send_number_picker(client: discord.Client, channel, user_id: str, text: str) -> bool:
-    """Send the range dropdown. False if numbers can't be looked up or none are free."""
-    data = _load()
+async def _claim_number(client: discord.Client, data: dict, user_id: str, session: dict, number) -> str:
+    """Try to reserve the typed number. Returns a [System: ...] note for the model."""
+    try:
+        number = int(number)
+    except (TypeError, ValueError):
+        return "[System: that wasn't a valid number. Ask them for a whole number again.]"
+    mx = numbers.number_max()
+    if number < 0 or number > mx:
+        return f"[System: car numbers here run 0 to {mx}. Ask them to choose another number in that range.]"
     info = await numbers.refresh(client, {int(n): u for n, u in data["reserved"].items()})
     if info is None:
-        return False
-    taken, _, _ = info
-    free = numbers.free_numbers(taken, data["reserved"], user_id)
-    if not free:
-        return False
-    view = _PickerView(user_id)
-    view.add_item(_RangeSelect(user_id, free))
-    await channel.send(text[:1900], view=view)
-    _live_views.add(user_id)
-    return True
-
-
-async def _picked(interaction: discord.Interaction, user_id: str, number: int) -> None:
-    await interaction.response.edit_message(content=f"Checking #{number} is still free...", view=None)
-    data = _load()
-    session = _live_session(data, user_id)
-    if session is None:
-        await interaction.edit_original_response(content="That interview has expired - ask an admin to restart it.")
-        return
-    info = await numbers.refresh(interaction.client, {int(n): u for n, u in data["reserved"].items()})
-    taken = info[0] if info else {}
+        await discordchan.post(
+            client, "FEEDBACK_CHANNEL_NAME",
+            f"Couldn't check car numbers for {session['name']} (signup list unreadable, no saved copy). "
+            f"Check Ricky's access to #{os.environ.get('SIGNUP_CHANNEL_NAME')}.")
+        return ("[System: number lookup is unavailable right now. Tell the driver an admin will sort out their car "
+                "number, then continue the interview and finish without a number.]")
+    taken = info[0]
     holder = data["reserved"].get(str(number))
     if number in taken or (holder and holder != user_id):
-        await interaction.edit_original_response(content=f"Ouch, #{number} just got taken.")
-        await _send_number_picker(interaction.client, interaction.channel, user_id, "Pick another one:")
-        return
+        free = numbers.free_numbers(taken, data["reserved"], user_id)
+        near = sorted(free, key=lambda n: (abs(n - number), n))[:6]
+        who = f" (it belongs to {taken[number]})" if taken.get(number) else ""
+        return (f"[System: #{number} is already taken{who}. Tell the driver, and suggest a few free ones nearby: "
+                f"{', '.join('#' + str(n) for n in sorted(near))}. Let them type another number.]")
     _release(data, user_id)
     data["reserved"][str(number)] = user_id
     session["number"] = number
-    session["awaiting_number"] = False
-    session["last"] = time.time()
-    session["messages"].append({"role": "user", "content": (
-        f"[System: the driver picked car number {number}. Acknowledge it briefly in your own voice and continue "
-        "with the remaining questions.]")})
     _save(data)
-    _live_views.discard(user_id)
-    await interaction.edit_original_response(content=f"Car **#{number}** is yours, pending admin confirmation.")
-    await _run_turn(interaction.client, data, user_id, session, interaction.channel)
+    return (f"[System: car number #{number} is free and now reserved for the driver (pending admin confirmation). "
+            "Acknowledge it briefly in your own voice and continue with the remaining questions.]")
 
 
 # ---- posting + nickname confirmation ---------------------------------------
@@ -377,7 +312,7 @@ async def _post_profile(client: discord.Client, user_id: str, session: dict, fie
 
 # ---- turn handling ---------------------------------------------------------
 
-async def _run_turn(client: discord.Client, data: dict, user_id: str, session: dict, channel, _retry: bool = False) -> None:
+async def _run_turn(client: discord.Client, data: dict, user_id: str, session: dict, channel, _depth: int = 0) -> None:
     try:
         response = await _turn(session)
     except Exception as exc:
@@ -419,23 +354,16 @@ async def _run_turn(client: discord.Client, data: dict, user_id: str, session: d
         await channel.send(reply or "No sweat, friend. If you change your mind, just holler.")
         return
 
-    if tool is not None and tool.name == "choose_number":
-        text = reply or "Now let's lock in your car number. Pick a range below, then your number."
-        session["messages"].append({"role": "assistant", "content": text})
-        session["awaiting_number"] = True
+    if tool is not None and tool.name == "claim_number":
+        number = tool.input.get("number")
+        session["messages"].append({"role": "assistant", "content": reply or f"Let me check on #{number}."})
+        if reply:
+            await channel.send(reply[:1900])
+        note = await _claim_number(client, data, user_id, session, number)
+        session["messages"].append({"role": "user", "content": note})
         _save(data)
-        if await _send_number_picker(client, channel, user_id, text):
-            return
-        # Couldn't look numbers up (or none free): carry on without, admins assign one.
-        session["awaiting_number"] = False
-        session["messages"].append({"role": "user", "content": (
-            "[System: number lookup is unavailable right now (or no numbers are free). Tell the driver an admin "
-            "will sort out their car number, then continue the interview and finish without a number.]")})
-        _save(data)
-        await discordchan.post(client, "FEEDBACK_CHANNEL_NAME",
-                               f"Couldn't offer car numbers to {session['name']} (signup list unreadable or full). Check Ricky's access to #{os.environ.get('SIGNUP_CHANNEL_NAME')}.")
-        if not _retry:
-            await _run_turn(client, data, user_id, session, channel, _retry=True)
+        if _depth < 3:
+            await _run_turn(client, data, user_id, session, channel, _depth + 1)
         return
 
     if not reply:
@@ -457,7 +385,6 @@ async def start(member: discord.abc.User, client: discord.Client, force: bool = 
         data["sessions"].pop(user_id, None)
         data["done"].pop(user_id, None)
         _release(data, user_id)
-        _live_views.discard(user_id)
     elif _live_session(data, user_id) or user_id in data["done"]:
         return "Already interviewed (or one is in progress)."
 
@@ -501,16 +428,6 @@ async def handle_reply(message: discord.Message, client: discord.Client) -> bool
     text = message.content.strip()
     if not text:
         return True  # attachment-only message mid-interview: ignore quietly
-
-    if session.get("awaiting_number"):
-        if text.lower().strip(" .!") not in ("skip", "stop", "cancel", "no thanks"):
-            if user_id in _live_views:
-                await message.channel.send("Use the dropdown above to pick your number, friend.")
-            elif not await _send_number_picker(client, message.channel, user_id, "Here's the number picker again:"):
-                await message.channel.send("I can't pull up the number list right now - ping an admin and they'll sort your number.")
-            return True
-        session["awaiting_number"] = False
-        _live_views.discard(user_id)
 
     session["replies"] += 1
     session["last"] = time.time()
