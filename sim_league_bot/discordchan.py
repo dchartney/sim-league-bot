@@ -32,11 +32,12 @@ def _admin_role_mention(guild: discord.Guild) -> str:
     return role.mention
 
 
-async def post(client: discord.Client, env_var: str, text: str) -> None:
+async def post(client: discord.Client, env_var: str, text: str) -> bool:
+    """Returns True if the message was posted, False if it was dropped."""
     channel_name = os.environ.get(env_var)
     if not channel_name:
         print(f"WARN: {env_var} not set, dropping message meant for that channel", file=sys.stderr)
-        return
+        return False
     try:
         for guild in client.guilds:
             channel = discord.utils.get(guild.text_channels, name=channel_name)
@@ -47,7 +48,8 @@ async def post(client: discord.Client, env_var: str, text: str) -> None:
                     text,
                     allowed_mentions=discord.AllowedMentions(roles=True, users=False, everyone=False),
                 )
-                return
+                return True
         print(f"WARN: channel '{channel_name}' ({env_var}) not found in any guild", file=sys.stderr)
     except Exception as exc:
         print(f"WARN: post to '{channel_name}' ({env_var}) failed: {exc!r}", file=sys.stderr)
+    return False

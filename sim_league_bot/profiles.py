@@ -44,7 +44,10 @@ SYSTEM = (
     "- Your first message: greet them by name, say you're Ricky Bobby with SCSRA Rules & Operations, explain in "
     "one or two sentences that you're collecting a few quick answers for a driver profile the admins may use for "
     "a welcome post, that they can say 'skip' any time, and ask the first question.\n"
-    "- Ask ONE or TWO questions at a time, conversationally, reacting briefly to what they say. Cover roughly "
+    "- REQUIRED questions, in this order: (1) FIRST question, in your opening message: how did they hear about "
+    "the SCSRA? (2) Their iRacing name and their current iRating (ask these together, right after). Make sure "
+    "both appear in the finished profile exactly as given.\n"
+    "- Then ask ONE or TWO questions at a time, conversationally, reacting briefly to what they say. Cover roughly "
     "these topics (skip any that don't fit, follow up if an answer is interesting): how long they've sim "
     "raced / how they got into it; real-life or iRacing background and favourite car or series; home or "
     "favourite track; racing hero; proudest (or most painful) moment on track; why they joined SCSRA; one fun "
@@ -238,11 +241,18 @@ async def handle_reply(message: discord.Message, client: discord.Client) -> bool
     if tool is not None and tool.name == "finish_profile":
         qa = tool.input.get("qa") or []
         tweet = tool.input.get("tweet") or ""
+        posted = True
         for chunk in _format_post(user_id, session["name"], qa, tweet):
-            await discordchan.post(client, "PROFILE_CHANNEL_NAME", chunk)
+            posted = await discordchan.post(client, "PROFILE_CHANNEL_NAME", chunk) and posted
         data["sessions"].pop(user_id, None)
-        data["done"][user_id] = {"name": session["name"], "finished": time.time(), "qa": qa, "tweet": tweet}
+        data["done"][user_id] = {"name": session["name"], "finished": time.time(), "qa": qa, "tweet": tweet, "posted": posted}
         _save(data)
+        if not posted:
+            await discordchan.post(
+                client, "FEEDBACK_CHANNEL_NAME",
+                f"**Driver profile for {session['name']} could NOT be posted** to #{os.environ['PROFILE_CHANNEL_NAME']} "
+                "(channel missing, or I lack View/Send permission there). The answers are saved on CT 111 in profiles.json.",
+            )
         await message.channel.send(reply or "That's a wrap - thanks! The admins will take a look at your profile.")
         return True
     if tool is not None and tool.name == "skip_profile":
