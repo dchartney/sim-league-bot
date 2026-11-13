@@ -32,6 +32,18 @@ def _admin_role_mention(guild: discord.Guild) -> str:
     return role.mention
 
 
+def find_channel(client: discord.Client, env_var: str):
+    """The text channel named by env var `env_var`, in any guild the bot is in, or None."""
+    channel_name = os.environ.get(env_var)
+    if not channel_name:
+        return None
+    for guild in client.guilds:
+        channel = discord.utils.get(guild.text_channels, name=channel_name)
+        if channel:
+            return channel
+    return None
+
+
 async def post(client: discord.Client, env_var: str, text: str) -> bool:
     """Returns True if the message was posted, False if it was dropped."""
     channel_name = os.environ.get(env_var)

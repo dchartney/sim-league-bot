@@ -22,6 +22,7 @@ def main() -> None:
     if profile_on_join:
         intents.members = True
     bot = discord.Client(intents=intents)
+    bot.add_dynamic_items(profiles.NickButton)  # persistent profile Confirm/Reject buttons
     tree = app_commands.CommandTree(bot)
     commands.setup(tree)
 

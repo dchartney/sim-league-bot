@@ -10,7 +10,7 @@ from typing import Optional
 import discord
 from discord import app_commands
 
-from . import admins, discordchan, feedback, nl, profiles, ratelimit, rule_edit, rules, voice, results
+from . import admins, discordchan, feedback, nl, numbers, profiles, ratelimit, rule_edit, rules, voice, results
 
 
 def _caller_id(interaction: discord.Interaction) -> str:
@@ -127,6 +127,26 @@ def setup(tree: app_commands.CommandTree) -> None:
         target = member or interaction.user
         status = await profiles.start(target, interaction.client, force=True)
         await interaction.followup.send(f"{status} (Answers will post to #{os.environ.get('PROFILE_CHANNEL_NAME', 'new-driver-profiles')}.)", ephemeral=True)
+
+    @tree.command(name="numbers", description="(Admin) Show which car numbers Ricky sees as taken")
+    async def numbers_cmd(interaction: discord.Interaction):
+        if not admins.is_admin(_caller_id(interaction)):
+            await interaction.response.send_message("Only an admin can do that.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        info = await numbers.refresh(interaction.client)
+        if info is None:
+            await interaction.followup.send(
+                f"I can't read #{os.environ.get('SIGNUP_CHANNEL_NAME')} and have no saved list. Check my View + Read History permission there.",
+                ephemeral=True)
+            return
+        taken, skipped, source = info
+        sample = ", ".join(f"#{n} {taken[n][:20]}" for n in sorted(taken)[:12])
+        text = (f"Source: {source}. **{len(taken)}** numbers taken (max number {numbers.number_max()}).\n"
+                f"First few: {sample}\n"
+                f"Lines I couldn't read a number from: {len(skipped)}"
+                + (f" (e.g. `{skipped[0]}`)" if skipped else ""))
+        await interaction.followup.send(text[:1900], ephemeral=True)
 
     for group in (rule_group, results_group, feedback_group):
         tree.add_command(group)
