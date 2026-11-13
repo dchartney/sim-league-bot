@@ -3,6 +3,7 @@ rate limit, same expensive call) but skip the classify step - the user's
 intent is already explicit from picking the command, so there's nothing
 to classify."""
 import asyncio
+import os
 import sys
 from typing import Optional
 
@@ -116,17 +117,16 @@ def setup(tree: app_commands.CommandTree) -> None:
         await interaction.response.defer(ephemeral=True)
         await interaction.followup.send(await work(), ephemeral=True)
 
-    profile_group = app_commands.Group(name="profile", description="New-driver profile interviews")
-
-    @profile_group.command(name="start", description="(Admin) DM a member Ricky's driver-profile interview")
-    @app_commands.describe(member="Who to interview (restarts it if they already did one)")
-    async def profile_start_cmd(interaction: discord.Interaction, member: discord.Member):
+    @tree.command(name="new-member", description="(Admin) Simulate a new member joining: DMs them Ricky's driver-profile interview")
+    @app_commands.describe(member="Who to run it on (defaults to you). Restarts it if they already did one.")
+    async def new_member_cmd(interaction: discord.Interaction, member: Optional[discord.Member] = None):
         if not admins.is_admin(_caller_id(interaction)):
             await interaction.response.send_message("Only an admin can do that.", ephemeral=True)
             return
         await interaction.response.defer(ephemeral=True)
-        status = await profiles.start(member, interaction.client, force=True)
-        await interaction.followup.send(status, ephemeral=True)
+        target = member or interaction.user
+        status = await profiles.start(target, interaction.client, force=True)
+        await interaction.followup.send(f"{status} (Answers will post to #{os.environ.get('PROFILE_CHANNEL_NAME', 'driver-profiles')}.)", ephemeral=True)
 
-    for group in (rule_group, results_group, feedback_group, profile_group):
+    for group in (rule_group, results_group, feedback_group):
         tree.add_command(group)
